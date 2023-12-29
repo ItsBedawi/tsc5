@@ -1,5 +1,110 @@
-#include "imports/stdlib.fc";
+// SPDX-License-Identifier: MIT
+pragma ton-solidity >= 0.45.0;
+pragma AbiHeader expire;
 
-() recv_internal(int my_balance, int msg_value, cell in_msg_full, slice in_msg_body) impure {
+contract InheritanceContract {
 
+    // Storage structure to store contract data
+    struct Store {
+        uint256 public_key;
+        uint32 execution_time;
+        address receiver;
+        uint32 seqno;
+    }
+
+    // Mapping to store data for each contract
+    mapping(address => Store) public stores;
+
+    // Modifier to ensure that only the contract owner can call certain functions
+    modifier onlyOwner(address contractAddress) {
+        require(msg.pubkey() == tvm.pubkey(), 102);
+        require(msg.sender == contractAddress, 103);
+        _;
+    }
+
+    // Modifier to ensure that a specific function is called after a certain time
+    modifier onlyAfter(uint32 time) {
+        require(now > time, 122);
+        _;
+    }
+
+    // Modifier to ensure that a specific function is called within a certain time range
+    modifier onlyWithin(uint32 startTime, uint32 lockedFor) {
+        require(now <= startTime + lockedFor, 123);
+        _;
+    }
+
+    // Modifier to ensure that a specific function is called only if locked_for is positive
+    modifier onlyPositive(uint32 lockedFor) {
+        require(lockedFor > 0, 121);
+        _;
+    }
+
+    // Function to initialize the contract
+    function init_store(address contractAddress, uint256 publicKey, uint32 executionTime, address receiver, uint32 seqno) external {
+        // Ensure that the contract is not already initialized
+        require(stores[contractAddress].public_key == 0, 118);
+        
+        // Initialize the contract data
+        stores[contractAddress] = Store({
+            public_key: publicKey,
+            execution_time: executionTime,
+            receiver: receiver,
+            seqno: seqno
+        });
+    }
+
+    // Function to handle the 0x9df10277 message
+    function handle_message_9df10277(uint64 queryId, bytes signature, uint32 lockedFor, uint32 newSeqno) external onlyOwner(msg.sender) onlyPositive(lockedFor) {
+        Store storage store = stores[msg.sender];
+
+        // Check if newSeqno is seqno + 1
+        require(newSeqno == store.seqno + 1, 119);
+
+        // Check the validity of the signature
+        bytes32 dataHash = keccak256(abi.encodePacked(queryId, lockedFor, newSeqno));
+        require(tvm.pubkey().verifySignature(dataHash, signature), 120);
+
+        // Check if execution_time has not passed
+        require(now < store.execution_time, 122);
+
+        // Check if the deferral of the will is valid
+        require(now + lockedFor < store.execution_time, 123);
+
+        // Update execution_time and seqno
+        store.execution_time += lockedFor;
+        store.seqno = newSeqno;
+    }
+
+    // Function to handle the 0xbb4be234 message
+    function handle_message_bb4be234(uint64 queryId) external onlyAfter(stores[msg.sender].execution_time) {
+        Store storage store = stores[msg.sender];
+
+        // Check if execution_time has already occurred
+        require(now >= store.execution_time, 124);
+
+        // Transfer all TONs from the contract balance to the receiver's address
+        transferBalance(store.receiver, address(this).balance);
+    }
+
+    // Function to get the last up-to-date seqno from the store
+    function get_seqno() external view returns (uint32) {
+        return stores[msg.sender].seqno;
+    }
+
+    // Function to get the time in seconds when the contract should be unlocked
+    function get_execution_time() external view returns (uint32) {
+        return stores[msg.sender].execution_time;
+    }
+
+    // Internal function to transfer balance
+    function transferBalance(address to, uint128 amount) internal {
+        // Transfer the balance
+        tvm.transfer(to, amount, false);
+    }
+
+    // Fallback function to receive TONs
+    receive() external {
+        // Accept incoming TONs
+    }
 }
